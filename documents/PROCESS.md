@@ -47,13 +47,19 @@ Claude Code (Sonnet 5)
 
 練習 2
 
-1. 三個 bug 我都先在頁面上重現過，才開始找程式
+1. 三個 bug 我都先在頁面上重現過，才開始找程式	
 2. 我給 agent 的資訊包含具體觀察（頁碼／金額數字／庫存數字），而不是只貼客訴原文
 3. 每個修復都回到頁面驗證過症狀消失
 4. 每個 bug 都補了一個回歸測試，`dotnet test` 全綠
 5. 三個獨立 commit，message 說明症狀與根因
 6. （思考題）為什麼原本的測試沒抓到這三個 bug？
-
+既有測試（`GetOrders_ReportsTotalCountAndTotalPages` 等）只驗證 `TotalCount`/`TotalPages`/狀態篩選，從沒斷言「第幾頁裡面實際是哪幾筆」，所以 Skip 的 off-by-one 完全不會被抓到。
+   - Gold 折扣：既有的 `CalculateTotal_AppliesTierDiscountOnSubtotal` 直接手動建構 `Order`/`OrderItem` 並自行設定未打折的 `UnitPriceSnapshot`，繞過了 `CreateOrderAsync`，只測了 `CalculateTotal` 這一個單元，沒有測
+「建單 → 計算總額」這條完整路徑，兩段程式碼交互出的雙重折扣就看不到。
+   - 庫存還原：既有的 `CancelOrder_ActiveOrder_SetsStatusCancelled` 只斷言 `Status` 變成 `Cancelled`，完全沒檢查取消後的 `StockQuantity`，死碼congenitally 不會被任何測試路徑執行到，自然沒人發現。
+   - 共同點：每個既有測試都只驗證單一維度（筆數、折扣率、狀態），沒有測「跨層/跨步驟的最終行為」——這正是這次「先讀完整段程式碼」比「只信任 agent 的文字描述」更可靠的原因。
+   
+   
 練習 3
 
 1. `/Products/LowStock` 不帶參數 → 門檻 10 的結果；帶 `?threshold=3` → 結果隨之改變
@@ -62,6 +68,15 @@ Claude Code (Sonnet 5)
 4. 停售（已停售 badge）商品不出現在列表
 5. 程式分層與命名跟既有的 Products 功能一致（請 agent 自我 review 一次，並自己確認）
 6. 至少 3 個新測試，`dotnet test` 全綠
+
+- 
+  「我要新增「低庫存警示頁面」：GET /Products/LowStock?threshold=10，列出 StockQuantity<threshold 且 IsActive 的商品、依庫存升冪排序，欄位要有近 30 天售出數量（排除 Cancelled 訂單），threshold 未帶預設 10、<=0 要顯示驗證錯誤而非 500，庫存 <5 要標記。這功能橫跨 Controller/Service/Repository/ViewModel/View/測試六層，先不要寫程式，動手前先讀 ProductsController、ProductService/IProductService、Views/Products/Index.cshtml，沿用同一套慣例，給我一份實作計畫，我核准後再動手。」
+  → 回應先讀完既有三層的實際寫法，才寫計畫：近 30 天銷量用 repository 裡一個 LINQ 關聯子查詢一次查完（不要在迴圈裡逐筆查，避免 N+1）、threshold 驗證沿用 CreateOrderViewModel 同一套 DataAnnotations 機制；等我核准這份計畫後才真的動手寫程式，沒有跳過這一步直接生程式碼。
+
+- 
+  「這個功能做完了，另外找一個獨立、完全沒看過這段對話的 agent 去對照規格逐條檢查（結果）；它要自己重新讀程式碼、重新跑一次 build/test，並且實際打 API 驗證行為，不能只讀程式碼就下結論（限制）；有 bug 或漏掉的邊界都要老實講出來，不是來背書的（品質標準）。」
+  → 回應另外開了一個沒有這段對話上下文的 agent，逐條核對規格，自己重跑 build/test、用 curl 打了幾個邊界情況（threshold=0、threshold=3、無參數），回報「規格全部符合、沒有發現 bug」，順帶指出兩個非阻塞的小觀察（InMemory 測試無法驗證真正的 SQL 轉譯、數字輸入框少了 `min="1"`）。
+  
 
 練習 4
 
@@ -76,3 +91,14 @@ Claude Code (Sonnet 5)
 （貼 1–2 段最有代表性的 prompt 與回應**摘要**——不用貼全文，重點是「我怎麼問」和「它怎麼答」。）
 
 - 問「你覺得建單流程是怎麼運作的？」→ agent 給出五步驟描述，其中「折扣只算一次」「取消會還原庫存」兩句話經讀原始碼後證實是錯的，且剛好對應到 `OrderService.CreateOrderAsync` 的 Gold 快照折扣與 `CancelOrderAsync` 的狀態判斷順序錯誤。
+
+- 
+  「商品頁庫存數字跟實際盤點兜不起來，而且好像每次取消訂單之後庫存就變得更少。我實測過：SKU-1001 原本庫存 27，建一筆數量 1 的訂單後正確變成 26；但把這筆訂單取消之後，庫存還是 26，沒有變回 27。我懷疑問題出在 CancelOrderAsync 判斷可取消狀態那段邏輯，麻煩先讀完整份 OrderService.cs 找根因，先不要動手改，找到後跟我說原因。」
+  → 回應讀完 `CancelOrderAsync` 全文後指出：`order.Status = OrderStatus.Cancelled` 這行寫在還原庫存的判斷式 `if (order.Status == Pending || Confirmed)` 之前，所以那個判斷式讀到的其實是「已經被改過」的狀態，永遠不成立，庫存還原的程式碼形同虛設——先回報根因，等確認後才動手修。
+
+- 
+  「財務對帳說 Gold 會員的訂單金額比手算少一截，但 Silver 完全正常。麻煩先補一個會重現這個症狀的回歸測試（要真的呼叫 CreateOrderAsync 走一次完整建單流程，不要手動建構 Order 物件繞過去），跑給我看它真的失敗，再去改 OrderService 的原始碼。」
+  → 回應先寫了 `CreateOrder_GoldCustomer_TotalDiscountedOnlyOnce`，跑起來後確認真的失敗（`UnitPriceSnapshot` 變成 900 而非 1000，證實 Gold 會員在建單當下就被多打了一次折），才動手拿掉 `CreateOrderAsync` 裡針對 Gold 的預先折扣區塊，改完重跑測試轉綠。
+
+
+
