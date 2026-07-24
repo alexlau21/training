@@ -5,33 +5,35 @@
 
 #### 使用的 agent 與模型：
 
+Claude Code (Sonnet 5)
+
 ---
 
 ## 通用四問
 
 ### 1. 我的任務拆解
 
-（開工前你把任務拆成哪幾步？實際做的時候順序有變嗎？為什麼變？）
-
--
+一開始以為「setup」就是把網站跑起來（README 的啟動步驟），做完 build/test/run 驗證後才發現這只是前置作業，「練習 1」實際上是另一件事——設定 agent 本身（CLAUDE.md、settings.json、hooks、subagents、skill）。順序變了：原本以為 task 1 = 環境跑起來，後來才拆成「環境跑起來」→「設定 agent 五個檔案」→「逐項驗證每個設定真的生效」→「commit」→「PROCESS.md 自我驗證」五步。中間也因為 git identity 沒設定卡了一次，commit 失敗後才補上 `git config`。
 
 ### 2. AI 幫上大忙的地方
 
-（哪件事 agent 做得又快又好？**貼上當時的提問原文**，說明為什麼這樣問有效。）
+環境診斷：直接查了 `dotnet --list-sdks`、SQL Server 服務清單、登錄檔的具名 instance，才發現 appsettings.json 預設的 `Server=localhost` 根本連不上（機器上只有 SQLEXPRESS / MSSQLSERVERTHIRD 具名實例 + LocalDB，沒有預設實例）。這種「先假設會動，出事才debug」跟「先掃過環境再動手」的差異，省了一次「dotnet run 却連不上 DB」的挫折。
 
--
+逐條驗證 permission/hook 設定：沒有只讀設定檔就假設它會生效，而是實際跑 `git push --force`（被 deny 擋下）、`dotnet ef database drop`（跳出 ask 確認）、用 sqlcmd 送 `TRUNCATE`（被 PreToolUse hook 擋下）、寫一個 sample.txt（PostToolUse hook 有記錄到 edit-log.txt）——每一條都是實際觸發、看到真實行為，不是憑印象確認。
 
 ### 3. AI 誤導我的地方，與我如何發現
 
-（agent 說錯／改錯／過度自信的時刻。你靠什麼抓到——對照程式碼？頁面實測？跑測試？）
+請 agent 描述「建單流程」，它講出兩處後來證實是錯的：
+1. 「折扣只在小計上算一次」——實際讀 `OrderService.CreateOrderAsync` 才發現 Gold 會員的單價快照在建單當下就先打過一次 9 折，`CalculateTotal` 又對小計整個再打一次折，等於折兩次（0.9×0.9）。Silver 沒有這段快照時折扣，所以正常。
+2. 「取消訂單會把庫存加回去」——實際讀 `CancelOrderAsync` 才看到 `order.Status = OrderStatus.Cancelled` 這行**先**執行，接下來判斷「還原庫存」的 `if (order.Status == Pending || Confirmed)` 因為狀態已經被改成 Cancelled，永遠不會成立，還原庫存那段是死碼。
 
--
+發現方式：不是靠讀 agent 的文字說明，而是直接把 `OrderService.cs`、`OrdersController.cs` 整份讀完、逐行對照它的描述。兩處都是真的會影響金額和庫存正確性的地方，如果照單全收會直接漏掉兩個 bug。
 
 ### 4. 我會帶回日常工作的一招
 
-（一個具體、可複製的做法，不要寫「要多驗證」這種口號——寫出**操作步驟**。）
+**先讓 agent 口頭描述一遍流程，再自己去讀對應的原始碼逐行核對，而不是先讀 agent 的結論再決定信不信。** 具體做法：問 agent「你覺得這段流程是怎麼運作的？」，拿到答案後不做任何評論，直接開對應的 service/controller 檔案，一行一行比對它講的每一句話，特別注意「只做一次」「應該會 xxx」這類肯定語氣的敘述——這類語句最容易藏著沒驗證過的假設。
 
--
+---
 
 ## 自我驗證（做到哪個階段答哪題）
 
@@ -39,9 +41,9 @@
 
 練習 1
 
-1. 我能不看筆記說出三個專案（Web/Core/Infrastructure）各自的職責
-2. 我核對過 agent 描述的建單流程，且**至少找出一處不精確或過度簡化的說法**
-3. 我知道商業邏輯應該放在哪一層、新增頁面要動哪些地方
+1. [o] 我能不看筆記說出三個專案（Web/Core/Infrastructure）各自的職責
+2. [o] 我核對過 agent 描述的建單流程，且至少找出一處不精確或過度簡化的說法（實際找出兩處：Gold 折扣算兩次、取消訂單庫存還原是死碼）
+3. [o] 我知道商業邏輯應該放在哪一層、新增頁面要動哪些地方（商業邏輯在 Core service；DB 查詢只能在 Infrastructure repository；新增頁面要動 Controller、Service、Repository、ViewModel、View、測試）
 
 練習 2
 
@@ -72,3 +74,5 @@
 ## 附錄：值得留下的對話片段
 
 （貼 1–2 段最有代表性的 prompt 與回應**摘要**——不用貼全文，重點是「我怎麼問」和「它怎麼答」。）
+
+- 問「你覺得建單流程是怎麼運作的？」→ agent 給出五步驟描述，其中「折扣只算一次」「取消會還原庫存」兩句話經讀原始碼後證實是錯的，且剛好對應到 `OrderService.CreateOrderAsync` 的 Gold 快照折扣與 `CancelOrderAsync` 的狀態判斷順序錯誤。
