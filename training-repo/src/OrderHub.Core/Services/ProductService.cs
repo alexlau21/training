@@ -1,3 +1,4 @@
+using OrderHub.Core.Common;
 using OrderHub.Core.Domain;
 using OrderHub.Core.Interfaces;
 
@@ -15,4 +16,10 @@ public class ProductService : IProductService
     public Task<IReadOnlyList<Product>> GetAllAsync() => _productRepository.GetAllAsync();
 
     public Task<IReadOnlyList<Product>> GetActiveAsync() => _productRepository.GetActiveAsync();
+
+    public Task<IReadOnlyList<ProductLowStockRow>> GetLowStockAsync(int threshold)
+    {
+        var since = DateTime.UtcNow.AddDays(-30);
+        return _productRepository.GetLowStockAsync(threshold, since);
+    }
 }
