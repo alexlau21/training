@@ -41,6 +41,44 @@ public class OrderServiceQueryTests
     }
 
     [Fact]
+    public async Task GetOrders_FirstPage_IncludesMostRecentlyCreatedOrder()
+    {
+        using var db = TestSetup.CreateContext();
+        var service = TestSetup.CreateOrderService(db);
+        var customer = TestSetup.AddCustomer(db);
+
+        Order? newest = null;
+        for (var i = 0; i < 25; i++)
+        {
+            var order = new Order { CustomerId = customer.Id, Status = OrderStatus.Pending, CreatedAt = DateTime.UtcNow.AddMinutes(-i) };
+            db.Orders.Add(order);
+            if (i == 0) newest = order;
+        }
+        db.SaveChanges();
+
+        var page1 = await service.GetOrdersAsync(1, 20, null);
+
+        Assert.Contains(page1.Items, o => o.Id == newest!.Id);
+    }
+
+    [Fact]
+    public async Task GetOrders_LastReportedPage_IsNotEmpty()
+    {
+        using var db = TestSetup.CreateContext();
+        var service = TestSetup.CreateOrderService(db);
+        var customer = TestSetup.AddCustomer(db);
+
+        for (var i = 0; i < 25; i++)
+            db.Orders.Add(new Order { CustomerId = customer.Id, Status = OrderStatus.Pending, CreatedAt = DateTime.UtcNow.AddMinutes(-i) });
+        db.SaveChanges();
+
+        var firstPage = await service.GetOrdersAsync(1, 20, null);
+        var lastPage = await service.GetOrdersAsync(firstPage.TotalPages, 20, null);
+
+        Assert.NotEmpty(lastPage.Items);
+    }
+
+    [Fact]
     public async Task GetCustomerOrders_ReturnsOnlyThatCustomersOrders()
     {
         using var db = TestSetup.CreateContext();
