@@ -2,6 +2,7 @@
 [Bb]in/
 [Oo]bj/
 out/
+publish/
 
 # Visual Studio
 .vs/
