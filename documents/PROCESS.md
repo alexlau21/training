@@ -84,6 +84,42 @@ Claude Code (Sonnet 5)
 2. 我能說出這次重構「改善了什麼、沒有改變什麼」
 3. 我有在 code review 的角度看過 diff（不是 agent 說好就好）
 
+### 第二階段 — 自建 MCP Server
+
+練習 1
+
+- [o] `dotnet build src/OrderHub.Mcp` 成功
+- [o] 獨立 commit（`68be45c` Add OrderHub MCP server with read-only tools）
+
+練習 2
+
+- [o] 三個工具 `customer_orders`/`get_order`/`low_stock` 都列得出來，description、參數說明如所寫
+- [o] `low_stock(threshold=10)` 回傳 5 筆商品，和 `/Products/LowStock` 頁面一致
+- [o] `get_order` 用不存在 Id（223423）得到清楚錯誤訊息「找不到訂單 223423」，不是 exception dump
+
+過程中撞到一個真實 bug（不是文件裡預告的地雷）：第一次在 Inspector 裡呼叫 `low_stock` 直接回「An error occurred invoking 'low_stock'.」，stderr 顯示 `Microsoft.Data.SqlClient.SqlException...Error Number:2,State:0,Class:20`（連線逾時）。根因是 `OrderHub.Mcp` 沒有自己的 appsettings.json，fallback 連線字串寫死 `Server=localhost`，但本機開發資料庫其實是 `(localdb)\MSSQLLocalDB`（`OrderHub.Web/appsettings.Development.json` 裡設定的）。修正 `Program.cs` 的 fallback 字串（commit `a4b9fa5`）後重測，`low_stock` 正確回傳結果。
+
+練習 3
+
+- [o] `training-repo/.mcp.json` 進 git，獨立 commit（`6460118`）
+- [o] Claude Code `/mcp` 可見 `orderhub` 與三個工具
+
+對照實驗——問「哪些商品庫存低於 5?」：
+
+| | 沒有 MCP（手動繞路） | MCP（Inspector CLI） | MCP（Claude Code 原生呼叫） |
+|---|---|---|---|
+| 呼叫次數 | 4（3 次 grep + 1 次 sqlcmd） | 1 | 1 |
+| 需要的先備知識 | domain model 欄位名稱、EF table 命名慣例、實際連線字串（LocalDB vs 誤導性的 localhost fallback） | 無 | 無 |
+| 輸出品質 | 類 CSV 文字，中文商品名亂碼（sqlcmd console codepage 問題） | 乾淨 JSON，中文正確 | 乾淨 JSON，中文正確 |
+| 正確性風險 | 高（容易漏掉 IsActive 篩選、抓錯 table/欄位、接錯 DB） | 低（規則只在工具裡實作一次） | 低 |
+| 實測時間 | 0.654 秒（3 次 grep + 1 次查詢） | 數秒（受 process/build 開銷影響） | 幾乎即時（server 已連線，單一 round-trip） |
+| 穩定性 | 每次都可重現（前提是已經知道怎麼查） | 一開始不穩：遇到 `dotnet run` 重建鎖檔導致的重連失敗（2 次 `-32000`） | 修正成指向 publish 後的執行檔（commit `8696a38`）後穩定 |
+| 團隊可重用性 | 沒人共用這段繞路，每個人都要重新摸索一次 | 需要手動開 Inspector | `.mcp.json` 進 git，任何人開這個 repo 用 Claude Code 就自動接上 |
+
+結論：速度差異（0.654 秒 vs 幾乎即時）其實不是重點——手動查詢會這麼快，是因為這次除錯過程裡我已經先知道 schema 和 DB 位置；真正冷啟動一定慢得多。真正的價值在於消除猜測、消除編碼問題，以及把「庫存 < 門檻 且上架中，依庫存升冪排序」這條業務規則收斂到工具裡實作一次，而不是每個人每次手動查詢時各自重新兜一次、還可能兜錯。
+
+意外插曲：MCP server 用 `dotnet run` 當啟動指令時，每次重新連線都會觸發整個專案重新編譯；如果前一個 server process 還沒完全結束（例如瀏覽器分頁裡開著的 MCP Inspector 沒關），重編譯的檔案複製步驟就會撞到檔案鎖（`MSB3027`），導致新啟動的 process 在完成 MCP handshake 前就先掛掉，Claude Code 端看到的就是 `-32000`。改成 `.mcp.json` 直接指向 `dotnet publish` 產出的執行檔（不再每次連線都重編譯）後，這個問題不再出現。代價：每次改了 `OrderHub.Mcp` 的程式碼，或是別人第一次 clone 這個 repo，都要手動跑一次 `dotnet publish src/OrderHub.Mcp -c Release -o src/OrderHub.Mcp/publish`——這個步驟目前只寫在 commit message 裡，還沒補進 README。
+
 ---
 
 ## 附錄：值得留下的對話片段
