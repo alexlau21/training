@@ -125,7 +125,7 @@ Claude Code (Sonnet 5)
 - [o] MCP Inspector 中 `cancel_order` 的 annotations：`destructiveHint: true`、`idempotentHint: false`；三個唯讀工具都顯示 `readOnlyHint: true`
 - [o] 對一筆待處理訂單（#2006，SKU-1001 × 2）呼叫 `cancel_order`：回傳「訂單 2006 已取消,庫存已回補」，直接查 DB 確認 SKU-1001 庫存從 23 變回 25
 - [o] 對同一筆訂單再取消一次：回傳「取消失敗:狀態為 Cancelled 的訂單不可取消」，是清楚的拒絕訊息而非 exception dump
-- [ ] 對 agent 說「幫我取消訂單 X」，親眼看到 Claude Code 的權限確認提示——這次驗證是透過 MCP Inspector CLI 直接呼叫工具做的，Inspector 不會像 Claude Code 一樣依 annotations 跳確認，所以這一項還沒有真的驗證過，之後要在 Claude Code 裡對真人 agent 對話重跑一次
+- [o] 對 agent 說「幫我取消訂單 2004」，在 Claude Code 對話裡（不是 Inspector）親眼看到權限確認提示，按允許後才真的執行：`get_order(2004)` 確認取消前是 Pending、吳宗翰（Standard）、SKU-1001×1 + SKU-1002×1；核准後 `cancel_order(2004)` 回傳「訂單 2004 已取消,庫存已回補」，再查 `get_order(2004)` 確認 Status 變成 Cancelled
 
 ---
 
