@@ -127,6 +127,18 @@ Claude Code (Sonnet 5)
 - [o] 對同一筆訂單再取消一次：回傳「取消失敗:狀態為 Cancelled 的訂單不可取消」，是清楚的拒絕訊息而非 exception dump
 - [o] 對 agent 說「幫我取消訂單 2004」，在 Claude Code 對話裡（不是 Inspector）親眼看到權限確認提示，按允許後才真的執行：`get_order(2004)` 確認取消前是 Pending、吳宗翰（Standard）、SKU-1001×1 + SKU-1002×1；核准後 `cancel_order(2004)` 回傳「訂單 2004 已取消,庫存已回補」，再查 `get_order(2004)` 確認 Status 變成 Cancelled
 
+練習 5
+
+- [o] MCP Inspector：Resources 分頁讀得到 `orderhub://discount-rules`（`resources/read` 回傳正確的折扣規則 markdown）；Prompts 分頁能帶 `threshold` 參數取得展開後的訊息（測過 `threshold=5`，樣板正確代入）
+- [o] Claude Code：`@orderhub:orderhub://discount-rules` 選取 resource 後問「Gold 會員買 100 元商品應該付多少?」，agent 直接用 resource 內容答對「90 元」，沒有另外去讀 `OrderService.cs`
+- [o] Claude Code：`/mcp__orderhub__low_stock_report` 一鍵展開範本 → 自動呼叫 `low_stock(threshold=10)` 查出 5 項低庫存商品 → 因為工具本身沒有「近期訂單量」這種查詢，改用 sqlcmd 直接查 30 天內非 Cancelled 訂單的銷量 → 產出含 SKU、名稱、現有庫存、建議補貨量、理由的採購建議表（例如 SKU-1032 曜石機械鍵盤：庫存 4、近 30 天賣 56 件、建議補 65、理由是庫存量低疊加銷量最高）
+
+（思考題）折扣規則用 Resource 給，和讓 agent 自己去讀 `OrderService.cs`，差在哪？prompt 範本放在 server，和每個人自己打一段話，差在哪？
+
+Resource 的差異：讀 `OrderService.cs` 需要 agent 自己找到折扣計算的程式碼、理解 `GetDiscountRate` 的邏輯，且每次問都要重新讀一次（或賭 agent 記得上次讀過的內容）；Resource 是把「這是什麼」直接攤開成一份固定的背景知識，一次讀取、內容跟程式碼一樣是團隊共同維護的東西，不會有人各自去讀程式碼後得出不同解讀。但代價正是文件裡地雷區提到的：resource 字串是手寫的 markdown，`OrderService` 的折扣率如果改了，這裡不會自動跟著變，變成兩份真相——這次寫的 resource 就是靜態字串，沒有動態組出內容，是刻意留著的技術債。
+
+Prompt 的差異：如果沒有 `low_stock_report` 這個 prompt，每個要做採購建議的人都要自己想「要用哪個 threshold、要接哪些工具、輸出格式要有哪些欄位」，同一件事每個人問法不同、格式不同、甚至漏問庫存門檻。範本放在 server 端等於把「怎麼問這個問題」也版本控制起來，全隊共用同一份、改進一次全部人受益；個人自己打字則是每次重新發明，且不會被 code review 到。
+
 ---
 
 ## 附錄：值得留下的對話片段
